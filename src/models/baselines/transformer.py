@@ -2,16 +2,16 @@ import torch
 import math
 from torch import nn
 from torch_geometric.nn import MLP
-from ..attention import (
-    PerformerAttention,
-    HEPTAttention,
-    ReformerAttention,
-    SmyrfAttention,
-    SBAttention,
-    FLTAttention,
-    PCTAttention,
-    FlatformerAttention,
-)
+# from ..attention import (
+#     PerformerAttention,
+#     HEPTAttention,
+#     ReformerAttention,
+#     SmyrfAttention,
+#     SBAttention,
+#     FLTAttention,
+#     PCTAttention,
+#     FlatformerAttention,
+# )
 from ..model_utils.mask_utils import FullMask
 from ..model_utils.hash_utils import pad_to_multiple, get_regions, quantile_partition
 from ..model_utils.window_utils import (
