@@ -1,4 +1,5 @@
 import torch
+import math
 from torch import nn
 from torch_geometric.nn import MLP
 from ..attention import (
@@ -13,7 +14,11 @@ from ..attention import (
 )
 from ..model_utils.mask_utils import FullMask
 from ..model_utils.hash_utils import pad_to_multiple, get_regions, quantile_partition
-from ..model_utils.window_utils import discretize_coords, FlattenedWindowMapping, get_pe_func
+from ..model_utils.window_utils import (
+    discretize_coords,
+    FlattenedWindowMapping,
+    get_pe_func,
+)
 from torch_geometric.utils import to_dense_batch
 from torch.utils.checkpoint import checkpoint
 from einops import rearrange
@@ -36,7 +41,9 @@ def prepare_input(x, coords, edge_index, batch, attn_type, helper_funcs):
 
     if attn_type in ["flatformer"]:
         discretized_coords = torch.zeros((x.shape[0], 4), device=x.device)
-        discretized_coords[:, -2:] = discretize_coords(coords[:, :2], B=helper_funcs["B"])
+        discretized_coords[:, -2:] = discretize_coords(
+            coords[:, :2], B=helper_funcs["B"]
+        )
         mappings = helper_funcs["mapping"](discretized_coords, batch_size=1)
         kwargs["mappings"] = mappings
 
@@ -45,13 +52,19 @@ def prepare_input(x, coords, edge_index, batch, attn_type, helper_funcs):
             block_size = helper_funcs["block_size"]
             kwargs["raw_size"] = x.shape[0]
             x = pad_to_multiple(x, block_size, dims=0)
-            kwargs["coords"] = pad_to_multiple(kwargs["coords"], block_size, dims=0, value=float("inf"))
+            kwargs["coords"] = pad_to_multiple(
+                kwargs["coords"], block_size, dims=0, value=float("inf")
+            )
             sorted_eta_idx = torch.argsort(kwargs["coords"][..., 0], dim=-1)
             sorted_phi_idx = torch.argsort(kwargs["coords"][..., 1], dim=-1)
             regions = helper_funcs["regions"]
             regions_h = rearrange(regions, "c a h -> a (c h)")
-            region_indices_eta = quantile_partition(sorted_eta_idx, regions_h[0][:, None])
-            region_indices_phi = quantile_partition(sorted_phi_idx, regions_h[1][:, None])
+            region_indices_eta = quantile_partition(
+                sorted_eta_idx, regions_h[0][:, None]
+            )
+            region_indices_phi = quantile_partition(
+                sorted_phi_idx, regions_h[1][:, None]
+            )
             kwargs["region_indices"] = [region_indices_eta, region_indices_phi]
             kwargs["regions_h"] = regions_h
             kwargs["coords"][kwargs["raw_size"] :] = 0.0
@@ -88,7 +101,9 @@ class Transformer(nn.Module):
             self.attns.append(Attn(attn_type, coords_dim, **kwargs))
 
         self.dropout = nn.Dropout(0.1)
-        self.W = nn.Linear(self.h_dim * (self.n_layers + 1), int(self.h_dim // 2), bias=False)
+        self.W = nn.Linear(
+            self.h_dim * (self.n_layers + 1), int(self.h_dim // 2), bias=False
+        )
         self.mlp_out = MLP(
             in_channels=int(self.h_dim // 2),
             out_channels=int(self.h_dim // 2),
@@ -103,30 +118,53 @@ class Transformer(nn.Module):
         if self.attn_type == "flatformer":
             self.helper_funcs["B"] = kwargs["B"]
             self.helper_funcs["mapping"] = FlattenedWindowMapping(**kwargs)
-            self.W = nn.Linear(self.h_dim * (self.n_layers * 4 + 1), int(self.h_dim // 2), bias=False)
+            self.W = nn.Linear(
+                self.h_dim * (self.n_layers * 4 + 1), int(self.h_dim // 2), bias=False
+            )
         elif self.attn_type == "hept":
             self.helper_funcs["block_size"] = kwargs["block_size"]
-            self.regions = nn.Parameter(get_regions(kwargs["num_regions"], kwargs["n_hashes"], kwargs["num_heads"]), requires_grad=False)
+            self.regions = nn.Parameter(
+                get_regions(
+                    kwargs["num_regions"], kwargs["n_hashes"], kwargs["num_heads"]
+                ),
+                requires_grad=False,
+            )
             self.helper_funcs["regions"] = self.regions
 
         elif self.attn_type == "smyrf":
-            self.helper_funcs["num_heads"], self.helper_funcs["pe_type"] = kwargs["num_heads"], kwargs["pe_type"]
+            self.helper_funcs["num_heads"], self.helper_funcs["pe_type"] = (
+                kwargs["num_heads"],
+                kwargs["pe_type"],
+            )
 
         if self.task == "pileup":
             self.out_proj = nn.Linear(int(self.h_dim // 2), 1)
 
     def forward(self, data):
         if isinstance(data, dict):
-            x, edge_index, coords, batch, self.use_ckpt = data["x"], data["edge_index"], data["coords"], data["batch"], False
+            x, edge_index, coords, batch, self.use_ckpt = (
+                data["x"],
+                data["edge_index"],
+                data["coords"],
+                data["batch"],
+                False,
+            )
         else:
-            x, edge_index, coords, batch = data.x, data.edge_index, data.coords, data.batch
+            x, edge_index, coords, batch = (
+                data.x,
+                data.edge_index,
+                data.coords,
+                data.batch,
+            )
 
         # discrete feature to embedding
         if self.task == "pileup":
             pids_emb = self.pids_enc(x[..., -1].long())
             x = torch.cat((x[..., :-1], pids_emb), dim=-1)
 
-        x, mask, kwargs = prepare_input(x, coords, edge_index, batch, self.attn_type, self.helper_funcs)
+        x, mask, kwargs = prepare_input(
+            x, coords, edge_index, batch, self.attn_type, self.helper_funcs
+        )
 
         encoded_x = self.feat_encoder(x)
         all_encoded_x = [encoded_x]
@@ -165,9 +203,15 @@ class Attn(nn.Module):
         self.num_heads = kwargs["num_heads"]
 
         if self.attn_type not in ["pct", "flatformer"]:
-            self.w_q = nn.Linear(self.dim_per_head, self.dim_per_head * self.num_heads, bias=False)
-            self.w_k = nn.Linear(self.dim_per_head, self.dim_per_head * self.num_heads, bias=False)
-            self.w_v = nn.Linear(self.dim_per_head, self.dim_per_head * self.num_heads, bias=False)
+            self.w_q = nn.Linear(
+                self.dim_per_head, self.dim_per_head * self.num_heads, bias=False
+            )
+            self.w_k = nn.Linear(
+                self.dim_per_head, self.dim_per_head * self.num_heads, bias=False
+            )
+            self.w_v = nn.Linear(
+                self.dim_per_head, self.dim_per_head * self.num_heads, bias=False
+            )
 
         if attn_type == "hept":
             # +2 for data.pos
@@ -185,7 +229,11 @@ class Attn(nn.Module):
             self.attn = FLTAttention(coords_dim - 1, **kwargs)
         elif attn_type == "pct":
             self.attn = PCTAttention(coords_dim, **kwargs)
-            self.w_q = nn.Linear(self.dim_per_head, self.dim_per_head * self.num_heads, bias=False)
+            self.w_q = nn.Linear(
+                self.dim_per_head, self.dim_per_head * self.num_heads, bias=False
+            )
+        elif attn_type == "mha":
+            self.attn = MHAAttention(**kwargs)
         elif attn_type == "flatformer":
             self.attn = FlatformerAttention(**kwargs)
         else:
@@ -202,11 +250,16 @@ class Attn(nn.Module):
             )
 
         # eta/phi from data.pos use the same weights as they are used to calc dR
-        self.w_rpe = nn.Linear(kwargs["num_w_per_dist"] * (coords_dim - 1), self.num_heads * self.dim_per_head)
+        self.w_rpe = nn.Linear(
+            kwargs["num_w_per_dist"] * (coords_dim - 1),
+            self.num_heads * self.dim_per_head,
+        )
         self.pe_func = get_pe_func(kwargs["pe_type"], coords_dim, kwargs)
 
     def forward(self, x, kwargs):
-        pe = kwargs["coords"] if self.pe_func is None else self.pe_func(kwargs["coords"])
+        pe = (
+            kwargs["coords"] if self.pe_func is None else self.pe_func(kwargs["coords"])
+        )
         if self.attn_type not in ["pct", "flatformer"]:
             x_pe = x + pe if self.pe_func is not None else x
             x_normed = self.norm1(x_pe)
@@ -227,3 +280,44 @@ class Attn(nn.Module):
             x = self.attn(x, pe=pe, w_rpe=self.w_rpe, **kwargs)
 
         return x
+
+
+class MHAAttention(nn.Module):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.dim_per_head = kwargs["h_dim"]
+        self.num_heads = kwargs["num_heads"]
+        self.dropout = nn.Dropout(0.1)
+        self.out_linear = nn.Linear(
+            self.num_heads * self.dim_per_head, self.dim_per_head
+        )
+
+    def forward(self, query, key, value, **kwargs):
+        key_padding_mask = kwargs.get("key_padding_mask", None)
+
+        # [b, n, h*d] -> [b, h, n, d]
+        q = rearrange(
+            query, "b n (h d) -> b h n d", h=self.num_heads, d=self.dim_per_head
+        )
+        k = rearrange(
+            key, "b n (h d) -> b h n d", h=self.num_heads, d=self.dim_per_head
+        )
+        v = rearrange(
+            value, "b n (h d) -> b h n d", h=self.num_heads, d=self.dim_per_head
+        )
+
+        scale = 1.0 / math.sqrt(self.dim_per_head)
+        attn_scores = torch.einsum("b h i d, b h j d -> b h i j", q, k) * scale
+
+        if key_padding_mask is not None and not key_padding_mask.all_ones:
+            # mask shape: [b, 1, 1, j]
+            mask = ~key_padding_mask.bool_matrix  # [b, j]
+            attn_scores = attn_scores.masked_fill(mask[:, None, None, :], float("-inf"))
+
+        attn = torch.softmax(attn_scores, dim=-1)
+        attn = self.dropout(attn)
+
+        out = torch.einsum("b h i j, b h j d -> b h i d", attn, v)
+        out = rearrange(out, "b h n d -> b n (h d)")
+        out = self.out_linear(out)
+        return out
