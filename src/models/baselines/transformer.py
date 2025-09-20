@@ -2,6 +2,7 @@ import torch
 import math
 from torch import nn
 from torch_geometric.nn import MLP
+
 # from ..attention import (
 #     PerformerAttention,
 #     HEPTAttention,
