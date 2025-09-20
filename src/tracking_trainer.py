@@ -14,7 +14,14 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR, StepLR
 from torch_geometric.utils import unbatch, remove_self_loops, to_undirected, subgraph
 from torch_geometric.nn import knn_graph, radius_graph
 
-from utils import set_seed, get_optimizer, log, get_lr_scheduler, add_random_edge, get_loss
+from utils import (
+    set_seed,
+    get_optimizer,
+    log,
+    get_lr_scheduler,
+    add_random_edge,
+    get_loss,
+)
 from utils.get_data import get_data_loader, get_dataset
 from utils.get_model import get_model
 from utils.metrics import acc_and_pr_at_k, point_filter
@@ -23,7 +30,13 @@ from utils.metrics import acc_and_pr_at_k, point_filter
 def train_one_batch(model, optimizer, criterion, data, lr_s):
     model.train()
     embeddings = model(data)
-    loss = criterion(embeddings, data.point_pairs_index, data.particle_id, data.reconstructable, data.pt)
+    loss = criterion(
+        embeddings,
+        data.point_pairs_index,
+        data.particle_id,
+        data.reconstructable,
+        data.pt,
+    )
 
     optimizer.zero_grad()
     loss.backward()
@@ -38,7 +51,13 @@ def train_one_batch(model, optimizer, criterion, data, lr_s):
 def eval_one_batch(model, optimizer, criterion, data, lr_s):
     model.eval()
     embeddings = model(data)
-    loss = criterion(embeddings, data.point_pairs_index, data.particle_id, data.reconstructable, data.pt)
+    loss = criterion(
+        embeddings,
+        data.point_pairs_index,
+        data.particle_id,
+        data.reconstructable,
+        data.pt,
+    )
     return loss.item(), embeddings.detach(), data.particle_id.detach()
 
 
@@ -47,12 +66,18 @@ def process_data(data, phase, device, epoch, p=0.2):
     if phase == "train":
         # pairs_to_add = add_random_edge(data.point_pairs_index, p=p, batch=data.batch, force_undirected=True)
         num_aug_pairs = int(data.point_pairs_index.size(1) * p / 2)
-        pairs_to_add = to_undirected(torch.randint(0, data.num_nodes, (2, num_aug_pairs), device=device))
-        data.point_pairs_index = torch.cat([data.point_pairs_index, pairs_to_add], dim=1)
+        pairs_to_add = to_undirected(
+            torch.randint(0, data.num_nodes, (2, num_aug_pairs), device=device)
+        )
+        data.point_pairs_index = torch.cat(
+            [data.point_pairs_index, pairs_to_add], dim=1
+        )
     return data
 
 
-def run_one_epoch(model, optimizer, criterion, data_loader, phase, epoch, device, metrics, lr_s):
+def run_one_epoch(
+    model, optimizer, criterion, data_loader, phase, epoch, device, metrics, lr_s
+):
     run_one_batch = train_one_batch if phase == "train" else eval_one_batch
     phase = "test " if phase == "test" else phase
 
@@ -62,8 +87,12 @@ def run_one_epoch(model, optimizer, criterion, data_loader, phase, epoch, device
             torch.cuda.empty_cache()
         data = process_data(data, phase, device, epoch)
 
-        batch_loss, batch_embeddings, batch_cluster_ids = run_one_batch(model, optimizer, criterion, data, lr_s)
-        batch_acc = update_metrics(metrics, data, batch_embeddings, batch_cluster_ids, criterion.dist_metric)
+        batch_loss, batch_embeddings, batch_cluster_ids = run_one_batch(
+            model, optimizer, criterion, data, lr_s
+        )
+        batch_acc = update_metrics(
+            metrics, data, batch_embeddings, batch_cluster_ids, criterion.dist_metric
+        )
         metrics["loss"].update(batch_loss)
 
         desc = f"[Epoch {epoch}] {phase}, loss: {batch_loss:.4f}, acc: {batch_acc:.4f}"
@@ -96,10 +125,15 @@ def update_metrics(metrics, data, batch_embeddings, batch_cluster_ids, dist_metr
     cluster_ids = unbatch(batch_cluster_ids, data.batch)
 
     for pt in metrics["pt_thres"]:
-        batch_mask = point_filter(batch_cluster_ids, data.reconstructable, data.pt, pt_thres=pt)
+        batch_mask = point_filter(
+            batch_cluster_ids, data.reconstructable, data.pt, pt_thres=pt
+        )
         mask = unbatch(batch_mask, data.batch)
 
-        res = [acc_and_pr_at_k(embeddings[i], cluster_ids[i], mask[i], dist_metric) for i in range(len(embeddings))]
+        res = [
+            acc_and_pr_at_k(embeddings[i], cluster_ids[i], mask[i], dist_metric)
+            for i in range(len(embeddings))
+        ]
         res = torch.tensor(res)
         metrics[f"accuracy@{pt}"].update(res[:, 0])
         metrics[f"precision@{pt}"].update(res[:, 1])
@@ -116,20 +150,32 @@ def run_one_seed(config):
     dataset_name = config["dataset_name"]
     model_name = config["model_name"]
     dataset_dir = Path(config["data_dir"]) / dataset_name.split("-")[0]
-    log(f"Device: {device}, Model: {model_name}, Dataset: {dataset_name}, Note: {config['note']}")
+    log(
+        f"Device: {device}, Model: {model_name}, Dataset: {dataset_name}, Note: {config['note']}"
+    )
 
     time = datetime.now().strftime("%m_%d-%H_%M_%S.%f")[:-4]
     rand_num = np.random.randint(10, 100)
-    log_dir = dataset_dir / "logs" / f"{time}{rand_num}_{model_name}_{config['seed']}_{config['note']}"
+    log_dir = (
+        dataset_dir
+        / "logs"
+        / f"{time}{rand_num}_{model_name}_{config['seed']}_{config['note']}"
+    )
     log(f"Log dir: {log_dir}")
     log_dir.mkdir(parents=True, exist_ok=False)
     writer = SummaryWriter(log_dir) if config["log_tensorboard"] else None
 
     set_seed(config["seed"])
     dataset = get_dataset(dataset_name, dataset_dir)
-    loaders = get_data_loader(dataset, dataset.idx_split, batch_size=config["batch_size"])
+    loaders = get_data_loader(
+        dataset, dataset.idx_split, batch_size=config["batch_size"]
+    )
 
     model = get_model(model_name, config["model_kwargs"], dataset)
+    # Log model architecture and parameter count
+    num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    log(f"Model parameters (trainable): {num_params}")
+    log("Model architecture:\n" + str(model))
     if config.get("only_flops", False):
         raise RuntimeError
     if config.get("resume", False):
@@ -139,36 +185,73 @@ def run_one_seed(config):
         model.load_state_dict(checkpoint, strict=True)
     model = model.to(device)
 
-    opt = get_optimizer(model.parameters(), config["optimizer_name"], config["optimizer_kwargs"])
-    config["lr_scheduler_kwargs"]["num_training_steps"] = config["num_epochs"] * len(loaders["train"])
-    lr_s = get_lr_scheduler(opt, config["lr_scheduler_name"], config["lr_scheduler_kwargs"])
+    opt = get_optimizer(
+        model.parameters(), config["optimizer_name"], config["optimizer_kwargs"]
+    )
+    config["lr_scheduler_kwargs"]["num_training_steps"] = config["num_epochs"] * len(
+        loaders["train"]
+    )
+    lr_s = get_lr_scheduler(
+        opt, config["lr_scheduler_name"], config["lr_scheduler_kwargs"]
+    )
     criterion = get_loss(config["loss_name"], config["loss_kwargs"])
 
     main_metric = config["main_metric"]
     pt_thres = [0, 0.5, 0.9]
     metric_names = ["accuracy", "precision", "recall"]
-    metrics = {f"{name}@{pt}": MeanMetric(nan_strategy="error") for name in metric_names for pt in pt_thres}
+    metrics = {
+        f"{name}@{pt}": MeanMetric(nan_strategy="error")
+        for name in metric_names
+        for pt in pt_thres
+    }
     metrics["loss"] = MeanMetric(nan_strategy="error")
     metrics["pt_thres"] = pt_thres
 
     coef = 1 if config["mode"] == "max" else -1
-    best_epoch, best_train = 0, {metric: -coef * float("inf") for metric in metrics.keys()}
+    best_epoch, best_train = 0, {
+        metric: -coef * float("inf") for metric in metrics.keys()
+    }
     best_valid, best_test = deepcopy(best_train), deepcopy(best_train)
 
     if writer is not None:
         layout = {
             "Gap": {
                 "loss": ["Multiline", ["train/loss", "valid/loss", "test/loss"]],
-                "acc@0.9": ["Multiline", ["train/accuracy@0.9", "valid/accuracy@0.9", "test/accuracy@0.9"]],
+                "acc@0.9": [
+                    "Multiline",
+                    ["train/accuracy@0.9", "valid/accuracy@0.9", "test/accuracy@0.9"],
+                ],
             }
         }
         writer.add_custom_scalars(layout)
 
     for epoch in range(config["num_epochs"]):
         if not config.get("only_eval", False):
-            train_res = run_one_epoch(model, opt, criterion, loaders["train"], "train", epoch, device, metrics, lr_s)
-        valid_res = run_one_epoch(model, opt, criterion, loaders["valid"], "valid", epoch, device, metrics, lr_s)
-        test_res = run_one_epoch(model, opt, criterion, loaders["test"], "test", epoch, device, metrics, lr_s)
+            train_res = run_one_epoch(
+                model,
+                opt,
+                criterion,
+                loaders["train"],
+                "train",
+                epoch,
+                device,
+                metrics,
+                lr_s,
+            )
+        valid_res = run_one_epoch(
+            model,
+            opt,
+            criterion,
+            loaders["valid"],
+            "valid",
+            epoch,
+            device,
+            metrics,
+            lr_s,
+        )
+        test_res = run_one_epoch(
+            model, opt, criterion, loaders["test"], "test", epoch, device, metrics, lr_s
+        )
 
         if lr_s is not None:
             if isinstance(lr_s, ReduceLROnPlateau):
@@ -177,7 +260,12 @@ def run_one_seed(config):
                 lr_s.step()
 
         if (valid_res[main_metric] * coef) > (best_valid[main_metric] * coef):
-            best_epoch, best_train, best_valid, best_test = epoch, train_res, valid_res, test_res
+            best_epoch, best_train, best_valid, best_test = (
+                epoch,
+                train_res,
+                valid_res,
+                test_res,
+            )
             torch.save(model.state_dict(), log_dir / "best_model.pt")
 
         print(
@@ -188,12 +276,17 @@ def run_one_seed(config):
 
         if writer is not None:
             writer.add_scalar("lr", opt.param_groups[0]["lr"], epoch)
-            for phase, res in zip(["train", "valid", "test"], [train_res, valid_res, test_res]):
+            for phase, res in zip(
+                ["train", "valid", "test"], [train_res, valid_res, test_res]
+            ):
                 for k, v in res.items():
                     writer.add_scalar(f"{phase}/{k}", v, epoch)
-            for phase, res in zip(["train", "valid", "test"], [best_train, best_valid, best_test]):
+            for phase, res in zip(
+                ["train", "valid", "test"], [best_train, best_valid, best_test]
+            ):
                 for k, v in res.items():
                     writer.add_scalar(f"best_{phase}/{k}", v, epoch)
+
 
 def main():
     parser = argparse.ArgumentParser(description="Train a model for tracking.")
