@@ -3,7 +3,7 @@ from models.baselines import Transformer, GNNStack
 from fvcore.nn import FlopCountAnalysis, flop_count_table
 
 
-def get_model(model_name, model_kwargs, dataset, test_N=10000, test_k=100):
+def get_model(model_name, model_kwargs, dataset, test_N=6000, test_k=100):
     model_type = model_name.split("_")[0]
     if model_type == "trans":
         model = Transformer(
@@ -20,7 +20,7 @@ def get_model(model_name, model_kwargs, dataset, test_N=10000, test_k=100):
             h_dim=model_kwargs["hidden_dim"],
             n_layers=model_kwargs["num_layers"],
             task=dataset.dataset_name,
-            **model_kwargs
+            **model_kwargs,
         )
     else:
         raise NotImplementedError
@@ -44,5 +44,12 @@ def count_flops_and_params(model, dataset, N, k):
     if dataset.dataset_name == "pileup":
         x[..., -2:] = 0.0
 
-    data = {"x": x, "edge_index": edge_index, "coords": coords, "pos": pos, "batch": batch, "edge_weight": edge_weight}
+    data = {
+        "x": x,
+        "edge_index": edge_index,
+        "coords": coords,
+        "pos": pos,
+        "batch": batch,
+        "edge_weight": edge_weight,
+    }
     print(flop_count_table(FlopCountAnalysis(model, data), max_depth=1))
