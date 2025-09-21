@@ -238,6 +238,8 @@ class Attn(nn.Module):
             self.attn = MHAAttention(**kwargs)
         elif attn_type == "sala":
             self.attn = SALAAttention(coords_dim=coords_dim, **kwargs)
+        elif attn_type == "linformer":
+            self.attn = LinformerAttention(**kwargs)
         elif attn_type == "flatformer":
             self.attn = FlatformerAttention(**kwargs)
         else:
@@ -369,4 +371,47 @@ class SALAAttention(nn.Module):
         )
         out = rearrange(out, "t b e -> b t e")  # [B, N, E]
         out = self.out_linear(out)  # [B, N, D]
+        return out
+
+
+class LinformerAttention(nn.Module):
+    def __init__(self, **kwargs):
+        super().__init__()
+        self.dim_per_head = kwargs["h_dim"]
+        self.num_heads = kwargs["num_heads"]
+        self.embed_dim = self.dim_per_head * self.num_heads
+
+        max_seq_len = kwargs.get("max_seq_len", 4096)
+        compressed = kwargs.get("compressed", 8)
+        proj_dim = kwargs.get("proj_dim", None)
+
+        # No clustering of E/F and no convolution
+        self.attn = MultiheadLinearAttention(
+            embed_dim=self.embed_dim,
+            num_heads=self.num_heads,
+            dropout=0.0,
+            max_seq_len=max_seq_len,
+            compressed=compressed,
+            proj_dim=proj_dim,
+            cluster_E=False,
+            cluster_F=False,
+            share_EF=False,
+            convolution=False,
+            self_attention=True,
+        )
+        self.out_linear = nn.Linear(self.embed_dim, self.dim_per_head)
+
+    def forward(self, query, key, value, **kwargs):
+        q_in = rearrange(query, "b n e -> n b e")  # [N, B, E]
+
+        pad_mask = None
+        key_padding_mask = kwargs.get("key_padding_mask", None)
+        if key_padding_mask is not None and not key_padding_mask.all_ones:
+            pad_mask = ~key_padding_mask.bool_matrix
+
+        out, _ = self.attn(
+            q_in, None, None, key_padding_mask=pad_mask, need_weights=False
+        )
+        out = rearrange(out, "t b e -> b t e")
+        out = self.out_linear(out)
         return out
