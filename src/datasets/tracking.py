@@ -54,12 +54,17 @@ def get_new_idx_split(dataset):
 class Tracking(InMemoryDataset):
     def __init__(self, root, dataset_name, debug=False, **kwargs):
         assert dataset_name in ["tracking-6k", "tracking-60k"]
-        self.url_processed_60k = "https://zenodo.org/records/10694703/files/tracking-60k-processed.zip"
-        self.url_processed_6k = "https://zenodo.org/records/10694703/files/tracking-6k-processed.zip"
+        self.url_processed_60k = (
+            "https://zenodo.org/records/10694703/files/tracking-60k-processed.zip"
+        )
+        self.url_processed_6k = (
+            "https://zenodo.org/records/10694703/files/tracking-6k-processed.zip"
+        )
 
         self.dataset_name = dataset_name
         self.n_sectors = 1 if dataset_name == "tracking-60k" else 10
         self.debug = debug
+        self.data_suffix = kwargs.get("data_suffix", None)
 
         self.feature_names = (
             "r",
@@ -78,10 +83,13 @@ class Tracking(InMemoryDataset):
             "gphi",
         )
         self.feature_scale = np.array(
-            [1000.0, np.pi, 1000.0, 1, 1 / 1000.0, 1 / 1000.0] + [1.0] * (len(self.feature_names) - 6)
+            [1000.0, np.pi, 1000.0, 1, 1 / 1000.0, 1 / 1000.0]
+            + [1.0] * (len(self.feature_names) - 6)
         )
 
-        super(Tracking, self).__init__(str(root), transform=kwargs.get("transform", None), pre_transform=None)
+        super(Tracking, self).__init__(
+            str(root), transform=kwargs.get("transform", None), pre_transform=None
+        )
         self.data, self.slices, self.idx_split = torch.load(self.processed_paths[0])
         self.idx_split = get_new_idx_split(self)
         self.x_dim = self._data.x.shape[1] + 1
@@ -102,10 +110,15 @@ class Tracking(InMemoryDataset):
     @property
     def processed_file_names(self):
         size = self.dataset_name.split("-")[-1]
-        return [f"data-{size}.pt"]
+        suffix = f"-{self.data_suffix}" if self.data_suffix else ""
+        return [f"data-{size}{suffix}.pt"]
 
     def download(self):
-        self.url_processed = self.url_processed_60k if self.dataset_name == "tracking-60k" else self.url_processed_6k
+        self.url_processed = (
+            self.url_processed_60k
+            if self.dataset_name == "tracking-60k"
+            else self.url_processed_6k
+        )
         warning = "This dataset would need ~65 GB of space after extraction. Do you want to continue? (y/n)\n"
         if osp.exists(self.processed_paths[0]):
             return
@@ -125,7 +138,8 @@ class Tracking(InMemoryDataset):
             all_point_clouds = all_point_clouds[:150]
 
         data_list = Parallel(n_jobs=32)(
-            delayed(self.process_point_cloud)(point_cloud) for point_cloud in tqdm(all_point_clouds)
+            delayed(self.process_point_cloud)(point_cloud)
+            for point_cloud in tqdm(all_point_clouds)
         )
 
         data, slices = self.collate(data_list)
@@ -166,7 +180,9 @@ class Tracking(InMemoryDataset):
     def get_idx_split_old(self, dataset_len):
         self.split = {"train": 0.8, "valid": 0.1, "test": 0.1}
         n_train = int(dataset_len * self.split["train"])
-        n_train = n_train - n_train % self.n_sectors  # make sure n_train is a multiple of n_sectors
+        n_train = (
+            n_train - n_train % self.n_sectors
+        )  # make sure n_train is a multiple of n_sectors
         n_valid = int(dataset_len * self.split["valid"])
 
         idx = np.arange(dataset_len)
@@ -189,9 +205,13 @@ def create_point_pairs_from_clusters(cluster_ids, nearby_point_pairs):
             continue
 
         # Get indices (node ids) belonging to the same cluster
-        cluster_nearby_points = nearby_point_pairs[1][torch.isin(nearby_point_pairs[0], same_cluster_indices)].unique()
+        cluster_nearby_points = nearby_point_pairs[1][
+            torch.isin(nearby_point_pairs[0], same_cluster_indices)
+        ].unique()
 
-        neg_pairs = torch.tensor(list(product(same_cluster_indices, cluster_nearby_points))).T
+        neg_pairs = torch.tensor(
+            list(product(same_cluster_indices, cluster_nearby_points))
+        ).T
         point_pairs.append(neg_pairs)
 
         pos_pairs = torch.tensor(list(combinations(same_cluster_indices, 2))).T
@@ -203,7 +223,9 @@ def create_point_pairs_from_clusters(cluster_ids, nearby_point_pairs):
 
 def gen_point_pairs(data, k):
     # nearby_point_pairs = to_undirected(knn_graph(data.pos, k=k, loop=False))
-    nearby_point_pairs = to_undirected(radius_graph(data.pos, r=1.0, loop=False, max_num_neighbors=k))
+    nearby_point_pairs = to_undirected(
+        radius_graph(data.pos, r=1.0, loop=False, max_num_neighbors=k)
+    )
     point_pairs = create_point_pairs_from_clusters(data.particle_id, nearby_point_pairs)
     point_pairs = remove_self_loops(to_undirected(point_pairs))[0]
     return point_pairs

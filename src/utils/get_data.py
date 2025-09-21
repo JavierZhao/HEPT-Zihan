@@ -21,9 +21,14 @@ def get_data_loader(dataset, idx_split, batch_size):
     return {"train": train_loader, "valid": valid_loader, "test": test_loader}
 
 
-def get_dataset(dataset_name, data_dir):
+def get_dataset(dataset_name, data_dir, data_suffix=None):
     if "tracking" in dataset_name:
-        dataset = Tracking(data_dir, transform=TrackingTransform(), dataset_name=dataset_name)
+        dataset = Tracking(
+            data_dir,
+            transform=TrackingTransform(),
+            dataset_name=dataset_name,
+            data_suffix=data_suffix,
+        )
     elif dataset_name == "pileup":
         dataset = Pileup(data_dir, transform=PileupTransform())
     else:

@@ -220,7 +220,9 @@ def run_one_seed(config):
     writer = SummaryWriter(log_dir) if config["log_tensorboard"] else None
 
     set_seed(config["seed"])
-    dataset = get_dataset(dataset_name, dataset_dir)
+    dataset = get_dataset(
+        dataset_name, dataset_dir, data_suffix=config.get("data_suffix", None)
+    )
     loaders = get_data_loader(
         dataset, dataset.idx_split, batch_size=config["batch_size"]
     )
@@ -372,6 +374,12 @@ def main():
         default=10,
         help="Bit depth for Morton code when sort_type=morton.",
     )
+    parser.add_argument(
+        "--data_suffix",
+        type=str,
+        default=None,
+        help="Optional suffix for processed data file, e.g., 'sample' for data-<size>-sample.pt.",
+    )
     args = parser.parse_args()
 
     if args.model in ["gcn", "gatedgnn", "dgcnn", "gravnet"]:
@@ -380,6 +388,8 @@ def main():
         config_dir = Path(f"./configs/tracking/tracking_trans_{args.model}.yaml")
     config = yaml.safe_load(config_dir.open("r").read())
     config["out_dir"] = args.out_dir
+    if args.data_suffix is not None:
+        config["data_suffix"] = args.data_suffix
     # Inject CLI sorting options into model kwargs if provided
     if args.sort_type is not None:
         config.setdefault("model_kwargs", {})["sort_type"] = args.sort_type
