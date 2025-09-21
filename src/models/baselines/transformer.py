@@ -2,6 +2,7 @@ import torch
 import math
 from torch import nn
 from torch_geometric.nn import MLP
+from ..multiConvAttention import MultiheadLinearAttention
 
 # from ..attention import (
 #     PerformerAttention,
@@ -235,6 +236,8 @@ class Attn(nn.Module):
             )
         elif attn_type == "mha":
             self.attn = MHAAttention(**kwargs)
+        elif attn_type == "sala":
+            self.attn = SALAAttention(coords_dim=coords_dim, **kwargs)
         elif attn_type == "flatformer":
             self.attn = FlatformerAttention(**kwargs)
         else:
@@ -321,4 +324,49 @@ class MHAAttention(nn.Module):
         out = torch.einsum("b h i j, b h j d -> b h i d", attn, v)
         out = rearrange(out, "b h n d -> b n (h d)")
         out = self.out_linear(out)
+        return out
+
+
+class SALAAttention(nn.Module):
+    def __init__(self, coords_dim, **kwargs):
+        super().__init__()
+        self.dim_per_head = kwargs["h_dim"]
+        self.num_heads = kwargs["num_heads"]
+        self.embed_dim = self.dim_per_head * self.num_heads
+
+        max_seq_len = kwargs.get("max_seq_len", 4096)
+        compressed = kwargs.get("compressed", 8)
+        proj_dim = kwargs.get("proj_dim", None)
+        convolution = kwargs.get("convolution", True)
+        conv_filter_heights = kwargs.get("conv_filter_heights", [1, 3, 5])
+        vertical_stride = kwargs.get("vertical_stride", 1)
+
+        self.attn = MultiheadLinearAttention(
+            embed_dim=self.embed_dim,
+            num_heads=self.num_heads,
+            dropout=0.0,
+            max_seq_len=max_seq_len,
+            compressed=compressed,
+            proj_dim=proj_dim,
+            convolution=convolution,
+            conv_filter_heights=conv_filter_heights,
+            vertical_stride=vertical_stride,
+            self_attention=True,
+        )
+        self.out_linear = nn.Linear(self.embed_dim, self.dim_per_head)
+
+    def forward(self, query, key, value, **kwargs):
+        # We only need the query; K/V are built internally for self-attention
+        q_in = rearrange(query, "b n e -> n b e")  # [N, B, E]
+
+        pad_mask = None
+        key_padding_mask = kwargs.get("key_padding_mask", None)
+        if key_padding_mask is not None and not key_padding_mask.all_ones:
+            pad_mask = ~key_padding_mask.bool_matrix  # True where padded
+
+        out, _ = self.attn(
+            q_in, None, None, key_padding_mask=pad_mask, need_weights=False
+        )
+        out = rearrange(out, "t b e -> b t e")  # [B, N, E]
+        out = self.out_linear(out)  # [B, N, D]
         return out
