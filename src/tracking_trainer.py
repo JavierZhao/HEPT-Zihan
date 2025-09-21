@@ -10,6 +10,7 @@ import numpy as np
 import torch
 import sys
 from io import TextIOBase
+import re
 from torchmetrics import MeanMetric
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR, StepLR
@@ -42,6 +43,31 @@ class Tee(TextIOBase):
     def flush(self):
         for stream in self.streams:
             stream.flush()
+
+
+class FilteredTee(TextIOBase):
+    def __init__(self, console_stream, file_stream):
+        self.console = console_stream
+        self.file = file_stream
+
+    def write(self, s):
+        # Write to console unmodified (keeps tqdm progress bar)
+        self.console.write(s)
+        self.console.flush()
+
+        # Skip ephemeral progress updates (carriage returns without newline)
+        if "\r" in s and "\n" not in s:
+            return len(s)
+
+        # Strip ANSI escape codes before writing to file
+        s_no_ansi = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", s)
+        self.file.write(s_no_ansi)
+        self.file.flush()
+        return len(s)
+
+    def flush(self):
+        self.console.flush()
+        self.file.flush()
 
 
 def train_one_batch(model, optimizer, criterion, data, lr_s):
@@ -184,10 +210,10 @@ def run_one_seed(config):
     )
     log(f"Log dir: {log_dir}")
     log_dir.mkdir(parents=True, exist_ok=False)
-    # save console log to file in log_dir
+    # save console log to file in log_dir, filtering out tqdm progress bar lines
     log_file = (log_dir / "train.log").open("a")
-    sys.stdout = Tee(sys.stdout, log_file)
-    sys.stderr = Tee(sys.stderr, log_file)
+    sys.stdout = FilteredTee(sys.stdout, log_file)
+    sys.stderr = FilteredTee(sys.stderr, log_file)
     # save a copy of the full config for reproducibility
     with (log_dir / "config.yaml").open("w") as f:
         yaml.safe_dump(config, f, sort_keys=False)
