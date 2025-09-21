@@ -173,9 +173,13 @@ def run_one_seed(config):
 
     time = datetime.now().strftime("%m_%d-%H_%M_%S.%f")[:-4]
     rand_num = np.random.randint(10, 100)
+    base_logs_dir = (
+        Path(config.get("out_dir"))
+        if config.get("out_dir") is not None
+        else (dataset_dir / "logs")
+    )
     log_dir = (
-        dataset_dir
-        / "logs"
+        base_logs_dir
         / f"{time}{rand_num}_{model_name}_{config['seed']}_{config['note']}"
     )
     log(f"Log dir: {log_dir}")
@@ -184,6 +188,9 @@ def run_one_seed(config):
     log_file = (log_dir / "train.log").open("a")
     sys.stdout = Tee(sys.stdout, log_file)
     sys.stderr = Tee(sys.stderr, log_file)
+    # save a copy of the full config for reproducibility
+    with (log_dir / "config.yaml").open("w") as f:
+        yaml.safe_dump(config, f, sort_keys=False)
     writer = SummaryWriter(log_dir) if config["log_tensorboard"] else None
 
     set_seed(config["seed"])
@@ -320,6 +327,12 @@ def run_one_seed(config):
 def main():
     parser = argparse.ArgumentParser(description="Train a model for tracking.")
     parser.add_argument("-m", "--model", type=str, default="hept")
+    parser.add_argument(
+        "--out_dir",
+        type=str,
+        default="/j-jepa-vol/HEPT-Zihan/logs",
+        help="Directory to write logs and checkpoints.",
+    )
     args = parser.parse_args()
 
     if args.model in ["gcn", "gatedgnn", "dgcnn", "gravnet"]:
@@ -327,6 +340,7 @@ def main():
     else:
         config_dir = Path(f"./configs/tracking/tracking_trans_{args.model}.yaml")
     config = yaml.safe_load(config_dir.open("r").read())
+    config["out_dir"] = args.out_dir
     run_one_seed(config)
 
 
