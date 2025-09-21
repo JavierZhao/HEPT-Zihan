@@ -42,7 +42,7 @@ lr_scheduler_kwargs:
   step_size: 500
 
 
-data_dir: ../data/
+data_dir: /j-jepa-vol/HEPT-Zihan/data/
 dataset_name: tracking-6k
 main_metric: accuracy@0.9
 mode: max
