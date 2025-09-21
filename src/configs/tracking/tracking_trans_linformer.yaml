@@ -13,7 +13,7 @@ model_kwargs:
   n_layers: 3
   num_w_per_dist: 10
   # Linformer-specific
-  max_seq_len: 6000
+  max_seq_len: 8720
   compressed: 100
 
 

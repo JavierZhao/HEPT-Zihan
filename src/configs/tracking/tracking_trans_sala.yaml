@@ -12,7 +12,7 @@ model_kwargs:
   h_dim: 16
   n_layers: 3
   num_w_per_dist: 10
-  max_seq_len: 6000
+  max_seq_len: 8720
   compressed: 100
   convolution: true
   conv_filter_heights: [1, 3, 5]
