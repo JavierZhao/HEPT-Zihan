@@ -8,6 +8,8 @@ from datetime import datetime
 
 import numpy as np
 import torch
+import sys
+from io import TextIOBase
 from torchmetrics import MeanMetric
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR, StepLR
@@ -25,6 +27,21 @@ from utils import (
 from utils.get_data import get_data_loader, get_dataset
 from utils.get_model import get_model
 from utils.metrics import acc_and_pr_at_k, point_filter
+
+
+class Tee(TextIOBase):
+    def __init__(self, *streams):
+        self.streams = streams
+
+    def write(self, s):
+        for stream in self.streams:
+            stream.write(s)
+            stream.flush()
+        return len(s)
+
+    def flush(self):
+        for stream in self.streams:
+            stream.flush()
 
 
 def train_one_batch(model, optimizer, criterion, data, lr_s):
@@ -163,6 +180,10 @@ def run_one_seed(config):
     )
     log(f"Log dir: {log_dir}")
     log_dir.mkdir(parents=True, exist_ok=False)
+    # save console log to file in log_dir
+    log_file = (log_dir / "train.log").open("a")
+    sys.stdout = Tee(sys.stdout, log_file)
+    sys.stderr = Tee(sys.stderr, log_file)
     writer = SummaryWriter(log_dir) if config["log_tensorboard"] else None
 
     set_seed(config["seed"])
@@ -267,6 +288,14 @@ def run_one_seed(config):
                 test_res,
             )
             torch.save(model.state_dict(), log_dir / "best_model.pt")
+            with (log_dir / "best_metrics.txt").open("w") as f:
+                f.write(f"best_epoch: {best_epoch}\n")
+                for k, v in best_train.items():
+                    f.write(f"train/{k}: {v}\n")
+                for k, v in best_valid.items():
+                    f.write(f"valid/{k}: {v}\n")
+                for k, v in best_test.items():
+                    f.write(f"test/{k}: {v}\n")
 
         print(
             f"[Epoch {epoch}] Best epoch: {best_epoch}, train: {best_train[main_metric]:.4f}, "
