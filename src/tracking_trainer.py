@@ -444,7 +444,7 @@ def main():
     parser.add_argument(
         "--out_dir",
         type=str,
-        default="/j-jepa-vol/HEPT-Zihan/logs",
+        default="/j-jepa-vol/HEPT-Zihan/logs/tracking",
         help="Directory to write logs and checkpoints.",
     )
     parser.add_argument(
