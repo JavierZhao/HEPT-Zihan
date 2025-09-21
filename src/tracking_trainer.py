@@ -11,6 +11,10 @@ import torch
 import sys
 from io import TextIOBase
 import re
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 from torchmetrics import MeanMetric
 from torch.utils.tensorboard import SummaryWriter
 from torch.optim.lr_scheduler import ReduceLROnPlateau, LambdaLR, StepLR
@@ -49,21 +53,29 @@ class FilteredTee(TextIOBase):
     def __init__(self, console_stream, file_stream):
         self.console = console_stream
         self.file = file_stream
+        self._buffer = ""
 
     def write(self, s):
         # Write to console unmodified (keeps tqdm progress bar)
         self.console.write(s)
         self.console.flush()
 
-        # Skip ephemeral progress updates (carriage returns without newline)
-        if "\r" in s and "\n" not in s:
-            return len(s)
-
-        # Strip ANSI escape codes before writing to file
-        s_no_ansi = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", s)
-        self.file.write(s_no_ansi)
-        self.file.flush()
-        return len(s)
+        # Accumulate and only write complete lines to file
+        self._buffer += s
+        written = len(s)
+        while "\n" in self._buffer:
+            line, self._buffer = self._buffer.split("\n", 1)
+            # Keep only the last segment after carriage returns to capture the latest tqdm state
+            if "\r" in line:
+                line = line.split("\r")[-1]
+            # Drop empty lines
+            if not line:
+                continue
+            # Strip ANSI escape codes before writing to file
+            line_no_ansi = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", line)
+            self.file.write(line_no_ansi + "\n")
+            self.file.flush()
+        return written
 
     def flush(self):
         self.console.flush()
@@ -145,6 +157,8 @@ def run_one_epoch(
             prec, recall = metric_res["precision@0.9"], metric_res["recall@0.9"]
             desc = f"[Epoch {epoch}] {phase}, loss: {loss:.4f}, acc: {acc:.4f}, prec: {prec:.4f}, recall: {recall:.4f}"
             reset_metrics(metrics)
+            # Force a newline so FilteredTee captures the final tqdm line
+            print("\n", end="")
         pbar.set_description(desc)
     return metric_res
 
@@ -204,10 +218,12 @@ def run_one_seed(config):
         if config.get("out_dir") is not None
         else (dataset_dir / "logs")
     )
-    log_dir = (
-        base_logs_dir
-        / f"{time}{rand_num}_{model_name}_{config['seed']}_{config['note']}"
-    )
+    sort_type = config.get("model_kwargs", {}).get("sort_type", "none")
+    sort_suffix = f"_{sort_type}" if sort_type != "none" else ""
+    if sort_type == "morton":
+        sort_bits = config.get("model_kwargs", {}).get("morton_bits", 10)
+        sort_suffix += f"-mb{sort_bits}"
+    log_dir = base_logs_dir / f"{time}_{model_name}_{sort_suffix}_{rand_num}"
     log(f"Log dir: {log_dir}")
     log_dir.mkdir(parents=True, exist_ok=False)
     # save console log to file in log_dir, filtering out tqdm progress bar lines
@@ -269,6 +285,19 @@ def run_one_seed(config):
     }
     best_valid, best_test = deepcopy(best_train), deepcopy(best_train)
 
+    # History containers for plotting/logging
+    history = {
+        "epoch": [],
+        "train_loss": [],
+        "train_acc": [],
+        "valid_loss": [],
+        "valid_acc": [],
+        "test_loss": [],
+        "test_acc": [],
+    }
+    metrics_npz_path = log_dir / "metrics.npz"
+    curves_png_path = log_dir / "curves.png"
+
     if writer is not None:
         layout = {
             "Gap": {
@@ -309,6 +338,35 @@ def run_one_seed(config):
             model, opt, criterion, loaders["test"], "test", epoch, device, metrics, lr_s
         )
 
+        # Append metrics to history and CSV
+        history["epoch"].append(epoch)
+        history["train_loss"].append(
+            train_res["loss"] if not config.get("only_eval", False) else float("nan")
+        )
+        history["train_acc"].append(
+            train_res.get("accuracy@0.9", float("nan"))
+            if not config.get("only_eval", False)
+            else float("nan")
+        )
+        history["valid_loss"].append(valid_res["loss"])
+        history["valid_acc"].append(valid_res["accuracy@0.9"])
+        history["test_loss"].append(test_res["loss"])
+        history["test_acc"].append(test_res["accuracy@0.9"])
+        # Persist as NPZ (overwrites each epoch)
+        try:
+            np.savez(
+                metrics_npz_path,
+                epoch=np.array(history["epoch"], dtype=np.int32),
+                train_loss=np.array(history["train_loss"], dtype=np.float32),
+                train_acc=np.array(history["train_acc"], dtype=np.float32),
+                valid_loss=np.array(history["valid_loss"], dtype=np.float32),
+                valid_acc=np.array(history["valid_acc"], dtype=np.float32),
+                test_loss=np.array(history["test_loss"], dtype=np.float32),
+                test_acc=np.array(history["test_acc"], dtype=np.float32),
+            )
+        except Exception as e:
+            log(f"Saving metrics NPZ failed: {e}")
+
         if lr_s is not None:
             if isinstance(lr_s, ReduceLROnPlateau):
                 lr_s.step(valid_res[config["lr_scheduler_metric"]])
@@ -331,6 +389,34 @@ def run_one_seed(config):
                     f.write(f"valid/{k}: {v}\n")
                 for k, v in best_test.items():
                     f.write(f"test/{k}: {v}\n")
+
+        # Plot curves every 10 epochs
+        if (epoch + 1) % 10 == 0 or epoch == config["num_epochs"] - 1:
+            try:
+                plt.figure(figsize=(10, 4))
+                # Loss subplot
+                plt.subplot(1, 2, 1)
+                plt.plot(history["epoch"], history["train_loss"], label="train")
+                plt.plot(history["epoch"], history["valid_loss"], label="valid")
+                plt.plot(history["epoch"], history["test_loss"], label="test")
+                plt.xlabel("epoch")
+                plt.ylabel("loss")
+                plt.title("Loss")
+                plt.legend()
+                # Accuracy subplot
+                plt.subplot(1, 2, 2)
+                plt.plot(history["epoch"], history["train_acc"], label="train")
+                plt.plot(history["epoch"], history["valid_acc"], label="valid")
+                plt.plot(history["epoch"], history["test_acc"], label="test")
+                plt.xlabel("epoch")
+                plt.ylabel("accuracy@0.9")
+                plt.title("Accuracy")
+                plt.legend()
+                plt.tight_layout()
+                plt.savefig(curves_png_path)
+                plt.close()
+            except Exception as e:
+                log(f"Plotting failed: {e}")
 
         print(
             f"[Epoch {epoch}] Best epoch: {best_epoch}, train: {best_train[main_metric]:.4f}, "
