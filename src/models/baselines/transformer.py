@@ -342,6 +342,9 @@ class SALAAttention(nn.Module):
         convolution = kwargs.get("convolution", True)
         conv_filter_heights = kwargs.get("conv_filter_heights", [1, 3, 5])
         vertical_stride = kwargs.get("vertical_stride", 1)
+        cluster_E = kwargs.get("cluster_E", True)
+        cluster_F = kwargs.get("cluster_F", True)
+        share_EF = kwargs.get("share_EF", False)
 
         self.attn = MultiheadLinearAttention(
             embed_dim=self.embed_dim,
@@ -350,6 +353,9 @@ class SALAAttention(nn.Module):
             max_seq_len=max_seq_len,
             compressed=compressed,
             proj_dim=proj_dim,
+            cluster_E=cluster_E,
+            cluster_F=cluster_F,
+            share_EF=share_EF,
             convolution=convolution,
             conv_filter_heights=conv_filter_heights,
             vertical_stride=vertical_stride,
