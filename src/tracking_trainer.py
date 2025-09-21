@@ -218,10 +218,12 @@ def run_one_seed(config):
         if config.get("out_dir") is not None
         else (dataset_dir / "logs")
     )
-    log_dir = (
-        base_logs_dir
-        / f"{time}{rand_num}_{model_name}_{config['seed']}_{config['note']}"
-    )
+    sort_type = config.get("model_kwargs", {}).get("sort_type", "none")
+    sort_suffix = f"_{sort_type}" if sort_type != "none" else ""
+    if sort_type == "morton":
+        sort_bits = config.get("model_kwargs", {}).get("morton_bits", 10)
+        sort_suffix += f"-mb{sort_bits}"
+    log_dir = base_logs_dir / f"{time}_{model_name}_{sort_suffix}_{rand_num}"
     log(f"Log dir: {log_dir}")
     log_dir.mkdir(parents=True, exist_ok=False)
     # save console log to file in log_dir, filtering out tqdm progress bar lines
