@@ -15,7 +15,7 @@ model_kwargs:
   # Linformer-specific
   max_seq_len: 10000
   compressed: 8
-  proj_dim: 128
+  proj_dim: 1024
 
 
 loss_name: infonce
