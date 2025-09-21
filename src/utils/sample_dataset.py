@@ -12,7 +12,6 @@ def main():
         "-d",
         "--dataset_name",
         type=str,
-        required=True,
         default="tracking-6k",
         choices=["tracking-6k", "tracking-60k"],
         help="Which processed dataset to sample from.",
