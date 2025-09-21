@@ -2,6 +2,7 @@ import argparse
 from pathlib import Path
 import numpy as np
 import torch
+import sys
 
 
 def main():
@@ -47,6 +48,10 @@ def main():
     )
     args = parser.parse_args()
 
+    # Ensure `src` is on sys.path so `datasets` package is importable
+    src_dir = Path(__file__).resolve().parents[1]
+    if str(src_dir) not in sys.path:
+        sys.path.insert(0, str(src_dir))
     # Lazy import to avoid importing torch_geometric unless needed
     from datasets.tracking import Tracking
 
