@@ -13,13 +13,14 @@ def main():
         "--dataset_name",
         type=str,
         required=True,
+        default="tracking-6k",
         choices=["tracking-6k", "tracking-60k"],
         help="Which processed dataset to sample from.",
     )
     parser.add_argument(
         "--data_dir",
         type=str,
-        default="../data",
+        default="/j-jepa-vol/HEPT-Zihan/data",
         help="Root data directory (expects tracking/processed/<dataset_name>/data-*.pt).",
     )
     parser.add_argument(
