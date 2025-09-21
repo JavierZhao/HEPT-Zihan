@@ -333,6 +333,19 @@ def main():
         default="/j-jepa-vol/HEPT-Zihan/logs",
         help="Directory to write logs and checkpoints.",
     )
+    parser.add_argument(
+        "--sort_type",
+        type=str,
+        choices=["none", "dr", "morton", "lz"],
+        default="none",
+        help="Optional sequence sorting within batch for dense attention models.",
+    )
+    parser.add_argument(
+        "--morton_bits",
+        type=int,
+        default=10,
+        help="Bit depth for Morton code when sort_type=morton.",
+    )
     args = parser.parse_args()
 
     if args.model in ["gcn", "gatedgnn", "dgcnn", "gravnet"]:
@@ -341,6 +354,11 @@ def main():
         config_dir = Path(f"./configs/tracking/tracking_trans_{args.model}.yaml")
     config = yaml.safe_load(config_dir.open("r").read())
     config["out_dir"] = args.out_dir
+    # Inject CLI sorting options into model kwargs if provided
+    if args.sort_type is not None:
+        config.setdefault("model_kwargs", {})["sort_type"] = args.sort_type
+    if args.morton_bits is not None:
+        config.setdefault("model_kwargs", {})["morton_bits"] = args.morton_bits
     run_one_seed(config)
 
 

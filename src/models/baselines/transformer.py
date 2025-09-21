@@ -33,6 +33,61 @@ def prepare_input(x, coords, edge_index, batch, attn_type, helper_funcs):
         x, mask = to_dense_batch(x, batch)
         coords = to_dense_batch(coords, batch)[0]
         key_padding_mask = FullMask(mask)
+
+        # Optional sequence sorting within each batch item
+        sort_type = helper_funcs.get("sort_type", "none")
+        if sort_type != "none":
+            B, T, D = x.shape
+
+            def compute_sort_keys(sort_type, x, coords, mask):
+                if sort_type == "dr":
+                    # Delta R over (eta, phi)
+                    eta_phi = coords[..., :2]
+                    keys = torch.sqrt((eta_phi**2).sum(dim=-1))  # [B, T]
+                elif sort_type == "lz":
+                    # local z at index 11 (Tracking features: lx=9, ly=10, lz=11)
+                    keys = x[..., 11]
+                elif sort_type == "morton":
+                    # Morton codes over (lx, ly, lz) -> indices 9,10,11
+                    xyz = x[..., 9:12]
+                    # Min-max normalize per batch to [0, 1]
+                    mins = torch.where(
+                        mask.any(dim=1, keepdim=True),
+                        xyz.min(dim=1, keepdim=True).values,
+                        torch.zeros_like(xyz[:, :1]),
+                    )
+                    maxs = torch.where(
+                        mask.any(dim=1, keepdim=True),
+                        xyz.max(dim=1, keepdim=True).values,
+                        torch.ones_like(xyz[:, :1]),
+                    )
+                    denom = (maxs - mins).clamp_min(1e-6)
+                    norm = ((xyz - mins) / denom).clamp(0, 1)
+                    bits = helper_funcs.get("morton_bits", 10)
+                    grid = (norm * (2**bits - 1)).long()  # [B, T, 3]
+                    xg, yg, zg = grid.unbind(dim=-1)
+                    code = torch.zeros_like(xg, dtype=torch.long)
+                    for b in range(bits):
+                        code |= ((xg >> b) & 1) << (3 * b)
+                        code |= ((yg >> b) & 1) << (3 * b + 1)
+                        code |= ((zg >> b) & 1) << (3 * b + 2)
+                    keys = code.to(x.dtype)
+                else:
+                    keys = torch.arange(T, device=x.device).unsqueeze(0).expand(B, -1)
+                # Push padded positions to the end
+                keys = keys + (~mask).to(keys.dtype) * 1e9
+                return keys
+
+            keys = compute_sort_keys(sort_type, x, coords, mask)
+            sort_idx = torch.argsort(keys, dim=1)  # [B, T]
+            # Reorder x and coords
+            gather_idx_feat = sort_idx.unsqueeze(-1).expand(-1, -1, x.size(-1))
+            gather_idx_coords = sort_idx.unsqueeze(-1).expand(-1, -1, coords.size(-1))
+            x = x.gather(1, gather_idx_feat)
+            coords = coords.gather(1, gather_idx_coords)
+            # Inverse indices to restore original order later
+            unsort_idx = torch.argsort(sort_idx, dim=1)
+            kwargs["unsort_idx"] = unsort_idx
     else:
         assert batch.max() == 0
         key_padding_mask = None
@@ -138,6 +193,9 @@ class Transformer(nn.Module):
                 kwargs["num_heads"],
                 kwargs["pe_type"],
             )
+        # Sorting options (applies to dense-batch attention types)
+        self.helper_funcs["sort_type"] = kwargs.get("sort_type", "none")
+        self.helper_funcs["morton_bits"] = kwargs.get("morton_bits", 10)
 
         if self.task == "pileup":
             self.out_proj = nn.Linear(int(self.h_dim // 2), 1)
@@ -183,6 +241,11 @@ class Transformer(nn.Module):
 
         encoded_x = self.W(torch.cat(all_encoded_x, dim=-1))
         out = encoded_x + self.dropout(self.mlp_out(encoded_x))
+
+        # Restore original per-batch order if sorting was applied
+        if kwargs.get("unsort_idx", None) is not None:
+            unsort_idx = kwargs["unsort_idx"]
+            out = out.gather(1, unsort_idx.unsqueeze(-1).expand(-1, -1, out.size(-1)))
 
         if kwargs.get("raw_size", False):
             out = out[: kwargs["raw_size"]]
