@@ -33,6 +33,8 @@ def inspect_tracking(dataset, max_events):
         )
 
     num_nodes, num_edges, num_pairs = [], [], []
+    max_len = 0
+    max_len_idx = -1
     has_keys = {}
     scan_n = min(len(dataset), max_events)
     for i in range(scan_n):
@@ -56,6 +58,9 @@ def inspect_tracking(dataset, max_events):
             num_edges.append(int(data.edge_index.size(1)))
         if getattr(data, "point_pairs_index", None) is not None:
             num_pairs.append(int(data.point_pairs_index.size(1)))
+        if n > max_len:
+            max_len = n
+            max_len_idx = i
 
     print("Field presence (over first", scan_n, "events):")
     for k, v in has_keys.items():
@@ -70,12 +75,15 @@ def inspect_tracking(dataset, max_events):
     if len(dataset) > 0:
         d0 = dataset[0]
         print("\nFirst sample shapes:")
-        for k in d0.keys:
+        for k in d0.keys():
             t = getattr(d0, k)
             try:
                 print(f"  {k}: {tuple(t.shape)} {t.dtype}")
             except Exception:
                 print(f"  {k}: <non-tensor>")
+    print(
+        f"\nMax sequence length (num_nodes) over first {scan_n} events: {max_len} at index {max_len_idx}"
+    )
 
 
 def inspect_pileup(dataset, max_events):
@@ -90,21 +98,29 @@ def inspect_pileup(dataset, max_events):
         )
 
     num_nodes = []
+    max_len = 0
+    max_len_idx = -1
     scan_n = min(len(dataset), max_events)
     for i in range(scan_n):
         data = dataset[i]
         num_nodes.append(data.num_nodes)
+        if data.num_nodes > max_len:
+            max_len = data.num_nodes
+            max_len_idx = i
     summarize_array("num_nodes", num_nodes)
 
     if len(dataset) > 0:
         d0 = dataset[0]
         print("\nFirst sample shapes:")
-        for k in d0.keys:
+        for k in d0.keys():
             t = getattr(d0, k)
             try:
                 print(f"  {k}: {tuple(t.shape)} {t.dtype}")
             except Exception:
                 print(f"  {k}: <non-tensor>")
+    print(
+        f"\nMax sequence length (num_nodes) over first {scan_n} events: {max_len} at index {max_len_idx}"
+    )
 
 
 def main():
