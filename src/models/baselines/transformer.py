@@ -372,8 +372,25 @@ class Attn(nn.Module):
             x_pe = x + pe if self.pe_func is not None else x
             x_normed = self.norm1(x_pe)
             if self.attn_type == "linformerExt":
-                # Use external Linformer directly on embeddings
-                aggr_out = self.linformer(x_normed)
+                # External Linformer requires fixed input_size; pad/truncate as needed
+                B, T, D = x_normed.shape
+                target = getattr(self.linformer, "input_size", None)
+                if target is None:
+                    target = kwargs.get("max_seq_len", 4096)
+                if T < target:
+                    pad_T = target - T
+                    x_in = torch.cat([x_normed, x_normed.new_zeros(B, pad_T, D)], dim=1)
+                elif T > target:
+                    # Safer to error explicitly to avoid silent truncation
+                    raise AssertionError(
+                        f"Sequence length {T} exceeds external Linformer input_size {target}. "
+                        f"Increase model_kwargs.max_seq_len or use the internal Linformer option."
+                    )
+                else:
+                    x_in = x_normed
+
+                aggr_full = self.linformer(x_in)
+                aggr_out = aggr_full[:, :T, :]
                 x = x + self.dropout(aggr_out)
                 ff_output = self.ff(self.norm2(x))
                 x = x + self.dropout(ff_output)
