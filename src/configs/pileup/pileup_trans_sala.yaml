@@ -22,8 +22,10 @@ model_kwargs:
   share_EF: false
 
 
-loss_name: crossentropy
-loss_kwargs: {}
+loss_name: focal
+loss_kwargs:
+  dist_metric: l2_rbf
+  tau: 0.05
 
 
 optimizer_name: adam
