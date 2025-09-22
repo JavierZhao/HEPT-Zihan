@@ -173,7 +173,7 @@ def run_one_seed(config, tune=False):
     if sort_type == "morton":
         sort_bits = config.get("model_kwargs", {}).get("morton_bits", 10)
         sort_suffix += f"-mb{sort_bits}"
-    log_dir = base_logs_dir / f"{time}_{model_name}_{sort_suffix}_{rand_num}"
+    log_dir = base_logs_dir / f"{model_name}_{sort_suffix}_{note}_{rand_num}_{time}"
     log(f"Log dir: {log_dir}")
     log_dir.mkdir(parents=True, exist_ok=False)
     # Logging tee
