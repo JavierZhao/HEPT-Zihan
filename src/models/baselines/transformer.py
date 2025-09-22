@@ -337,7 +337,6 @@ class Attn(nn.Module):
                 depth=1,
                 dropout=0.0,
                 activation="relu",
-                use_pos_emb=False,
                 checkpoint_level="C0",
                 parameter_sharing="none",
             )
@@ -372,7 +371,7 @@ class Attn(nn.Module):
         if self.attn_type not in ["pct", "flatformer"]:
             x_pe = x + pe if self.pe_func is not None else x
             x_normed = self.norm1(x_pe)
-            if self.attn_type == "linformer_ext":
+            if self.attn_type == "linformerExt":
                 # Use external Linformer directly on embeddings
                 aggr_out = self.linformer(x_normed)
                 x = x + self.dropout(aggr_out)
