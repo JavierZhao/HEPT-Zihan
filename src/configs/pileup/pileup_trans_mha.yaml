@@ -10,7 +10,7 @@ model_kwargs:
   pe_type: learned
   num_heads: 4
   h_dim: 16
-  n_layers: 3
+  n_layers: 2
   num_w_per_dist: 10
 
 
