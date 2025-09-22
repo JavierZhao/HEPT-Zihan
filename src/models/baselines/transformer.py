@@ -25,6 +25,11 @@ from torch_geometric.utils import to_dense_batch
 from torch.utils.checkpoint import checkpoint
 from einops import rearrange
 
+try:
+    from linformer_pytorch import Linformer as ExternalLinformer
+except Exception:
+    ExternalLinformer = None
+
 
 def prepare_input(x, coords, edge_index, batch, attn_type, helper_funcs):
     kwargs = {}
@@ -317,6 +322,25 @@ class Attn(nn.Module):
             self.attn = SALAAttention(coords_dim=coords_dim, **kwargs)
         elif attn_type == "linformer":
             self.attn = LinformerAttention(**kwargs)
+        elif attn_type == "linformer_ext":
+            if ExternalLinformer is None:
+                raise ImportError(
+                    "linformer-pytorch is not installed. Install with `pip install linformer-pytorch`."
+                )
+            # Build a single-layer external Linformer over embeddings
+            self.linformer = ExternalLinformer(
+                input_size=kwargs.get("max_seq_len", 4096),
+                channels=self.dim_per_head,
+                dim_k=kwargs.get("proj_dim", 128),
+                dim_ff=max(self.dim_per_head, 128),
+                nhead=self.num_heads,
+                depth=1,
+                dropout=0.0,
+                activation="relu",
+                use_pos_emb=False,
+                checkpoint_level="C0",
+                parameter_sharing="none",
+            )
         elif attn_type == "flatformer":
             self.attn = FlatformerAttention(**kwargs)
         else:
@@ -346,12 +370,19 @@ class Attn(nn.Module):
         if self.attn_type not in ["pct", "flatformer"]:
             x_pe = x + pe if self.pe_func is not None else x
             x_normed = self.norm1(x_pe)
-            q, k, v = self.w_q(x_normed), self.w_k(x_normed), self.w_v(x_normed)
-            aggr_out = self.attn(q, k, v, pe=pe, w_rpe=self.w_rpe, **kwargs)
+            if self.attn_type == "linformer_ext":
+                # Use external Linformer directly on embeddings
+                aggr_out = self.linformer(x_normed)
+                x = x + self.dropout(aggr_out)
+                ff_output = self.ff(self.norm2(x))
+                x = x + self.dropout(ff_output)
+            else:
+                q, k, v = self.w_q(x_normed), self.w_k(x_normed), self.w_v(x_normed)
+                aggr_out = self.attn(q, k, v, pe=pe, w_rpe=self.w_rpe, **kwargs)
 
-            x = x + self.dropout(aggr_out)
-            ff_output = self.ff(self.norm2(x))
-            x = x + self.dropout(ff_output)
+                x = x + self.dropout(aggr_out)
+                ff_output = self.ff(self.norm2(x))
+                x = x + self.dropout(ff_output)
 
         elif self.attn_type == "pct":
             aggr_out = self.attn(self.w_q(self.norm1(x)), w_rpe=self.w_rpe, **kwargs)

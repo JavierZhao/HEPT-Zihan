@@ -1,0 +1,44 @@
+device: cuda:0
+note: "large-ext"
+seed: 42
+log_tensorboard: false
+num_threads: 5
+
+
+model_name: trans_linformer_ext
+model_kwargs:
+  pe_type: learned
+  num_heads: 8
+  h_dim: 24
+  n_layers: 6
+  num_w_per_dist: 10
+  # Linformer-specific
+  max_seq_len: 15000
+  compressed: 100
+  proj_dim: 150
+
+
+loss_name: crossentropy
+loss_kwargs: {}
+
+
+optimizer_name: adam
+num_epochs: 200
+batch_size: 4
+optimizer_kwargs:
+  lr: 1.0e-3
+
+
+lr_scheduler_name: step
+lr_scheduler_kwargs:
+  gamma: 0.5
+  step_size: 50
+
+
+data_dir: /j-jepa-vol/HEPT-Zihan/data/
+dataset_name: pileup
+main_metric: auc
+mode: max
+
+
+
