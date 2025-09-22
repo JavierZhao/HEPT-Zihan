@@ -1,5 +1,5 @@
 device: cuda:0
-note: "k60_rad256_linformerTransExt"
+note: "linformer_ext"
 seed: 42
 log_tensorboard: false
 num_threads: 5
