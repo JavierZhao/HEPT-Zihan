@@ -8,7 +8,7 @@ num_threads: 5
 model_name: trans_mha
 model_kwargs:
   pe_type: learned
-  num_heads: 4
+  num_heads: 3
   h_dim: 16
   n_layers: 2
   num_w_per_dist: 10
