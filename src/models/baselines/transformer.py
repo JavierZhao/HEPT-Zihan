@@ -322,7 +322,7 @@ class Attn(nn.Module):
             self.attn = SALAAttention(coords_dim=coords_dim, **kwargs)
         elif attn_type == "linformer":
             self.attn = LinformerAttention(**kwargs)
-        elif attn_type == "linformer_ext":
+        elif attn_type == "linformerExt":
             if ExternalLinformer is None:
                 raise ImportError(
                     "linformer-pytorch is not installed. Install with `pip install linformer-pytorch`."
@@ -341,6 +341,8 @@ class Attn(nn.Module):
                 checkpoint_level="C0",
                 parameter_sharing="none",
             )
+            # Set a placeholder to avoid attribute errors in any generic paths
+            self.attn = None
         elif attn_type == "flatformer":
             self.attn = FlatformerAttention(**kwargs)
         else:
