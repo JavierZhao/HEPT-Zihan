@@ -1,5 +1,5 @@
 device: cuda:0
-note: "pileup_mha"
+note: "small"
 seed: 42
 log_tensorboard: false
 num_threads: 5
@@ -8,8 +8,8 @@ num_threads: 5
 model_name: trans_mha
 model_kwargs:
   pe_type: learned
-  num_heads: 2
-  h_dim: 16
+  num_heads: 1
+  h_dim: 12
   n_layers: 1
   num_w_per_dist: 10
 
