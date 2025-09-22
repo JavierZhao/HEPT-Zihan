@@ -80,7 +80,7 @@ def train_one_batch(model, optimizer, criterion, data, lr_s):
 
     if lr_s is not None and isinstance(lr_s, LambdaLR):
         lr_s.step()
-    return loss.item(), embeddings.detach()
+    return loss.item(), logits.detach()
 
 
 @torch.no_grad()
