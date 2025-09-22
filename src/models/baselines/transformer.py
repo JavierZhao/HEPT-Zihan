@@ -273,8 +273,7 @@ class Transformer(nn.Module):
             out = out[mask]
 
         if self.task == "pileup":
-            out = self.out_proj(out)
-            out = torch.sigmoid(out)
+            out = self.out_proj(out)  # logits (no sigmoid)
 
         return out
 

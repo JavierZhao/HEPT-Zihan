@@ -11,13 +11,15 @@ from torch_geometric.utils import batched_negative_sampling
 from typing import Optional, Tuple
 from torch import Tensor
 
-from utils.losses import InfoNCELoss, FocalLoss
+from utils.losses import InfoNCELoss, FocalLoss, FocalBCELoss
 
 
 def compute_edge_weight(data):
     node_positions = data.pos
     node_indices = data.edge_index
-    dist = torch.sum((node_positions[node_indices[0]] - node_positions[node_indices[1]]) ** 2, dim=1)
+    dist = torch.sum(
+        (node_positions[node_indices[0]] - node_positions[node_indices[1]]) ** 2, dim=1
+    )
     dist = torch.unsqueeze(dist, dim=-1)
     edge_weights = -dist  # Calculate torch.exp(-dist / w) in the forward process
     return edge_weights
@@ -41,9 +43,11 @@ def get_loss(loss_name, loss_kwargs):
     if loss_name == "infonce":
         return InfoNCELoss(**loss_kwargs)
     elif loss_name == "crossentropy":
-        return torch.nn.BCELoss()
+        return torch.nn.BCEWithLogitsLoss()
     elif loss_name == "focal":
         return FocalLoss()
+    elif loss_name == "focal_bce_logits":
+        return FocalBCELoss(**loss_kwargs)
     else:
         raise NotImplementedError
 
@@ -73,7 +77,12 @@ def get_lr_scheduler(optimizer, lr_scheduler_name, lr_scheduler_kwargs):
 
 
 def get_cosine_schedule_with_warmup(
-    optimizer, num_warmup_steps, num_training_steps, eta_min, num_cycles=0.5, last_epoch=-1
+    optimizer,
+    num_warmup_steps,
+    num_training_steps,
+    eta_min,
+    num_cycles=0.5,
+    last_epoch=-1,
 ):
     """
     Create a schedule with a learning rate that decreases following the values of the cosine function between the
@@ -100,8 +109,13 @@ def get_cosine_schedule_with_warmup(
     def lr_lambda(current_step):
         if current_step < num_warmup_steps:
             return float(current_step) / float(max(1, num_warmup_steps))
-        progress = float(current_step - num_warmup_steps) / float(max(1, num_training_steps - num_warmup_steps))
-        return max(eta_min, 0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)))
+        progress = float(current_step - num_warmup_steps) / float(
+            max(1, num_training_steps - num_warmup_steps)
+        )
+        return max(
+            eta_min,
+            0.5 * (1.0 + math.cos(math.pi * float(num_cycles) * 2.0 * progress)),
+        )
 
     return LambdaLR(optimizer, lr_lambda, last_epoch)
 
@@ -185,7 +199,9 @@ def add_random_edge(
                 [1, 3, 2]])
     """
     if p < 0.0 or p > 1.0:
-        raise ValueError(f"Ratio of added edges has to be between 0 and 1 " f"(got '{p}')")
+        raise ValueError(
+            f"Ratio of added edges has to be between 0 and 1 " f"(got '{p}')"
+        )
 
     device = edge_index.device
     if not training or p == 0.0:

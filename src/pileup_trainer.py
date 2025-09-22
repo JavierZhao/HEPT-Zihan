@@ -72,8 +72,8 @@ class FilteredTee(TextIOBase):
 
 def train_one_batch(model, optimizer, criterion, data, lr_s):
     model.train()
-    embeddings = model(data)
-    loss = criterion(embeddings[data.is_neu], data.y[data.is_neu].unsqueeze(-1).float())
+    logits = model(data)  # logits
+    loss = criterion(logits[data.is_neu], data.y[data.is_neu].unsqueeze(-1).float())
     optimizer.zero_grad()
     loss.backward()
     optimizer.step()
@@ -86,9 +86,9 @@ def train_one_batch(model, optimizer, criterion, data, lr_s):
 @torch.no_grad()
 def eval_one_batch(model, optimizer, criterion, data, lr_s):
     model.eval()
-    embeddings = model(data)
-    loss = criterion(embeddings[data.is_neu], data.y[data.is_neu].unsqueeze(-1).float())
-    return loss.item(), embeddings.detach()
+    logits = model(data)
+    loss = criterion(logits[data.is_neu], data.y[data.is_neu].unsqueeze(-1).float())
+    return loss.item(), logits.detach()
 
 
 def run_one_epoch(
@@ -135,13 +135,14 @@ def compute_metrics(metrics):
     } | {"loss": metrics["loss"].compute().item()}
 
 
-def update_metrics(metrics, data, embeddings):
-    pred = (embeddings > 0.5).int()[data.is_neu].cpu()
+def update_metrics(metrics, data, logits):
+    prob = torch.sigmoid(logits).detach()
+    pred = (prob > 0.5).int()[data.is_neu].cpu()
     label = data.y[data.is_neu].cpu()
-    embeddings = embeddings[data.is_neu].cpu()
+    prob = prob[data.is_neu].cpu()
 
-    auc = average_precision_score(label, embeddings)
-    roc = roc_auc_score(label, embeddings)
+    auc = average_precision_score(label, prob)
+    roc = roc_auc_score(label, prob)
     f1 = f1_score(label, pred)
 
     metrics["auc"].update(auc)

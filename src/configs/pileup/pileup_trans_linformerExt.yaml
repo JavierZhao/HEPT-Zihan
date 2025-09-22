@@ -17,10 +17,12 @@ model_kwargs:
   compressed: 100
   proj_dim: 150
 
-loss_name: focal
+loss_name: focal_bce_logits
 loss_kwargs:
-  dist_metric: l2_rbf
-  tau: 0.05
+  gamma: 1.5
+  alpha_pos: 0.35        # set from train counts
+  label_smoothing: 0.05
+  reduction: mean
 
 
 optimizer_name: adam
