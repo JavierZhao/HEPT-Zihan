@@ -44,6 +44,16 @@ def prepare_input(x, coords, edge_index, batch, attn_type, helper_funcs):
                     # Delta R over (eta, phi)
                     eta_phi = coords[..., :2]
                     keys = torch.sqrt((eta_phi**2).sum(dim=-1))  # [B, T]
+                elif sort_type == "kt":
+                    # kT = delta_r * pT (pT index configurable; default 4 for pileup)
+                    eta_phi = coords[..., :2]
+                    dr = torch.sqrt((eta_phi**2).sum(dim=-1))
+                    pt_index = helper_funcs.get("pt_index", None)
+                    if pt_index is not None and pt_index < x.shape[-1]:
+                        pt = x[..., pt_index]
+                    else:
+                        pt = torch.ones_like(dr)
+                    keys = dr * pt
                 elif sort_type == "lz":
                     # local z at index 11 (Tracking features: lx=9, ly=10, lz=11)
                     keys = x[..., 11]
@@ -196,6 +206,10 @@ class Transformer(nn.Module):
         # Sorting options (applies to dense-batch attention types)
         self.helper_funcs["sort_type"] = kwargs.get("sort_type", "none")
         self.helper_funcs["morton_bits"] = kwargs.get("morton_bits", 10)
+        # pT index for pileup features (eta, phi, px, py, pt, E, rapidity, pids)
+        self.helper_funcs["pt_index"] = kwargs.get(
+            "pt_index", 4 if self.task == "pileup" else None
+        )
 
         if self.task == "pileup":
             self.out_proj = nn.Linear(int(self.h_dim // 2), 1)

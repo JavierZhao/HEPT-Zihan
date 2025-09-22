@@ -387,7 +387,7 @@ def main():
     parser.add_argument(
         "--sort_type",
         type=str,
-        choices=["none", "dr", "morton", "lz"],
+        choices=["none", "dr", "morton", "lz", "kt"],
         default="none",
         help="Optional sequence sorting within batch for dense attention models.",
     )
