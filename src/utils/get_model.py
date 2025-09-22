@@ -3,7 +3,7 @@ from models.baselines import Transformer, GNNStack
 from fvcore.nn import FlopCountAnalysis, flop_count_table
 
 
-def get_model(model_name, model_kwargs, dataset, test_N=6000, test_k=100):
+def get_model(model_name, model_kwargs, dataset, test_N=10000, test_k=100):
     model_type = model_name.split("_")[0]
     if model_type == "trans":
         model = Transformer(
