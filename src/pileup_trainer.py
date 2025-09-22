@@ -175,7 +175,10 @@ def run_one_seed(config, tune=False):
         sort_bits = config.get("model_kwargs", {}).get("morton_bits", 10)
         sort_suffix += f"-mb{sort_bits}"
     note = config.get("note", "N/A")
-    log_dir = base_logs_dir / f"{model_name}_{sort_suffix}_{note}_{rand_num}_{time}"
+    prefix = config.get("prefix", "N/A")
+    log_dir = (
+        base_logs_dir / f"{prefix}/{model_name}_{sort_suffix}_{note}_{rand_num}_{time}"
+    )
     log(f"Log dir: {log_dir}")
     log_dir.mkdir(parents=True, exist_ok=False)
     # Logging tee
@@ -405,6 +408,12 @@ def main():
         default=None,
         help="Optional suffix for processed data file (e.g., 'sample').",
     )
+    parser.add_argument(
+        "--prefix",
+        type=str,
+        default="N/A",
+        help="Optional prefix for log directory.",
+    )
     args = parser.parse_args()
 
     if args.model in ["gcn", "gatedgnn", "dgcnn", "gravnet"]:
@@ -419,6 +428,8 @@ def main():
         config.setdefault("model_kwargs", {})["morton_bits"] = args.morton_bits
     if args.data_suffix is not None:
         config["data_suffix"] = args.data_suffix
+    if args.prefix is not None:
+        config["prefix"] = args.prefix
     run_one_seed(config)
 
 
