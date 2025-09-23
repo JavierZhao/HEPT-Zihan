@@ -1,5 +1,5 @@
 device: cuda:0
-note: "small"
+note: "tiny"
 seed: 42
 log_tensorboard: false
 num_threads: 5
@@ -8,9 +8,9 @@ num_threads: 5
 model_name: trans_sala
 model_kwargs:
   pe_type: learned
-  num_heads: 4
-  h_dim: 16
-  n_layers: 3
+  num_heads: 2
+  h_dim: 8
+  n_layers: 2
   num_w_per_dist: 10
   max_seq_len: 15000
   compressed: 100
@@ -21,6 +21,8 @@ model_kwargs:
   cluster_E: true
   cluster_F: true
   share_EF: false
+  sala_attn_dropout: 0.3
+  sala_out_dropout: 0.0
 
 
 loss_name: focal_bce_logits
@@ -35,6 +37,7 @@ num_epochs: 200
 batch_size: 4
 optimizer_kwargs:
   lr: 1.0e-3
+  weight_decay: 1.0e-4
 
 
 lr_scheduler_name: step

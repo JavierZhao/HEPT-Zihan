@@ -470,11 +470,13 @@ class SALAAttention(nn.Module):
         cluster_E = kwargs.get("cluster_E", True)
         cluster_F = kwargs.get("cluster_F", True)
         share_EF = kwargs.get("share_EF", False)
+        attn_dropout = kwargs.get("sala_attn_dropout", 0.1)
+        out_dropout = kwargs.get("sala_out_dropout", 0.0)
 
         self.attn = MultiheadLinearAttention(
             embed_dim=self.embed_dim,
             num_heads=self.num_heads,
-            dropout=0.0,
+            dropout=attn_dropout,
             max_seq_len=max_seq_len,
             compressed=compressed,
             proj_dim=proj_dim,
@@ -487,6 +489,7 @@ class SALAAttention(nn.Module):
             self_attention=True,
         )
         self.out_linear = nn.Linear(self.embed_dim, self.dim_per_head)
+        self.out_dropout = nn.Dropout(out_dropout)
 
     def forward(self, query, key, value, **kwargs):
         # We only need the query; K/V are built internally for self-attention
@@ -502,6 +505,7 @@ class SALAAttention(nn.Module):
         )
         out = rearrange(out, "t b e -> b t e")  # [B, N, E]
         out = self.out_linear(out)  # [B, N, D]
+        out = self.out_dropout(out)
         return out
 
 
