@@ -327,6 +327,8 @@ class Attn(nn.Module):
                     "linformer-pytorch is not installed. Install with `pip install linformer-pytorch`."
                 )
             # Build a single-layer external Linformer over embeddings
+            attn_dropout = kwargs.get("lin_attn_dropout", 0.1)
+            out_dropout = kwargs.get("lin_out_dropout", 0.0)
             self.linformer = ExternalLinformer(
                 input_size=kwargs.get("max_seq_len", 4096),
                 channels=self.dim_per_head,
@@ -334,13 +336,14 @@ class Attn(nn.Module):
                 dim_ff=max(self.dim_per_head, 128),
                 nhead=self.num_heads,
                 depth=1,
-                dropout=0.0,
+                dropout=attn_dropout,
                 activation="relu",
                 checkpoint_level="C0",
                 parameter_sharing="none",
             )
             # Set a placeholder to avoid attribute errors in any generic paths
             self.attn = None
+            self.lin_out_dropout = nn.Dropout(out_dropout)
         elif attn_type == "flatformer":
             self.attn = FlatformerAttention(**kwargs)
         else:
@@ -390,7 +393,7 @@ class Attn(nn.Module):
 
                 aggr_full = self.linformer(x_in)
                 aggr_out = aggr_full[:, :T, :]
-                x = x + self.dropout(aggr_out)
+                x = x + self.lin_out_dropout(aggr_out)
                 ff_output = self.ff(self.norm2(x))
                 x = x + self.dropout(ff_output)
             else:
@@ -519,12 +522,14 @@ class LinformerAttention(nn.Module):
         max_seq_len = kwargs.get("max_seq_len", 4096)
         compressed = kwargs.get("compressed", 8)
         proj_dim = kwargs.get("proj_dim", None)
+        attn_dropout = kwargs.get("lin_attn_dropout", 0.1)
+        out_dropout = kwargs.get("lin_out_dropout", 0.0)
 
         # No clustering of E/F and no convolution
         self.attn = MultiheadLinearAttention(
             embed_dim=self.embed_dim,
             num_heads=self.num_heads,
-            dropout=0.0,
+            dropout=attn_dropout,
             max_seq_len=max_seq_len,
             compressed=compressed,
             proj_dim=proj_dim,
@@ -535,6 +540,7 @@ class LinformerAttention(nn.Module):
             self_attention=True,
         )
         self.out_linear = nn.Linear(self.embed_dim, self.dim_per_head)
+        self.out_dropout = nn.Dropout(out_dropout)
 
     def forward(self, query, key, value, **kwargs):
         q_in = rearrange(query, "b n e -> n b e")  # [N, B, E]
@@ -549,4 +555,5 @@ class LinformerAttention(nn.Module):
         )
         out = rearrange(out, "t b e -> b t e")
         out = self.out_linear(out)
+        out = self.out_dropout(out)
         return out

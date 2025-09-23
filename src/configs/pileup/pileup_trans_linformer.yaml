@@ -1,5 +1,5 @@
 device: cuda:0
-note: "small"
+note: "small-reg"
 seed: 42
 log_tensorboard: false
 num_threads: 5
@@ -15,6 +15,8 @@ model_kwargs:
   # Linformer-specific
   max_seq_len: 15000
   compressed: 100
+  lin_attn_dropout: 0.3
+  lin_out_dropout: 0.0
 
 
 loss_name: focal_bce_logits
@@ -30,6 +32,7 @@ num_epochs: 200
 batch_size: 4
 optimizer_kwargs:
   lr: 1.0e-3
+  weight_decay: 1.0e-4
 
 
 lr_scheduler_name: step
