@@ -1,5 +1,5 @@
 import math
-from typing import Optional, Tuple
+from typing import Optional, Tuple, List
 
 import torch
 import torch.nn.functional as F
@@ -161,6 +161,7 @@ class MultiheadLinearAttention(nn.Module):
         vertical_stride: int = 1,
         self_attention: bool = False,
         encoder_decoder_attention: bool = False,
+        use_flash: bool = True,
     ):
         super().__init__()
         # dims and flags
@@ -174,6 +175,7 @@ class MultiheadLinearAttention(nn.Module):
         ), "embed_dim must be divisible by num_heads"
         self.scaling = self.head_dim**-0.5
         self.dropout = dropout
+        self.use_flash = use_flash
 
         self.self_attention = self_attention
         self.encoder_decoder_attention = encoder_decoder_attention
@@ -235,6 +237,26 @@ class MultiheadLinearAttention(nn.Module):
             self.attn_conv = AttentionConvLayer(
                 self.proj_dim, conv_filter_heights, vertical_stride
             )
+            # When using Flash attention, we cannot convolve scores pre-softmax.
+            # Provide a lightweight temporal depthwise Conv1d over attention output [B,H,T,Dh].
+            # kernel sizes mirror conv_filter_heights (vertical/heights).
+            self.post_attn_convs: Optional[nn.ModuleList] = nn.ModuleList(
+                [
+                    nn.Conv1d(
+                        in_channels=self.head_dim,
+                        out_channels=self.head_dim,
+                        kernel_size=h,
+                        padding=h // 2,
+                        stride=vertical_stride,
+                        groups=self.head_dim,
+                        bias=False,
+                    )
+                    for h in conv_filter_heights
+                ]
+            )
+            self._post_stride = vertical_stride
+        else:
+            self.post_attn_convs = None
 
         # optional biases
         if add_bias_kv:
@@ -336,26 +358,65 @@ class MultiheadLinearAttention(nn.Module):
         v = v.reshape(B * self.num_heads, -1, self.head_dim)
         q = q * self.scaling
 
-        # attention scores
-        scores = torch.bmm(q, k.transpose(1, 2))
-        if self.convolution:
-            scores = scores.view(B, self.num_heads, T, -1)
-            scores = self.attn_conv(scores)
-            scores = scores.reshape(B * self.num_heads, T, -1)
+        # attention
+        use_flash_ok = self.use_flash and (attn_mask is None) and (key_padding_mask is None)
+        if use_flash_ok:
+            # SDPA expects [B,H,T,Dh]
+            q_sdpa = q.view(B, self.num_heads, T, self.head_dim)
+            k_sdpa = k.view(B, self.num_heads, -1, self.head_dim)
+            v_sdpa = v.view(B, self.num_heads, -1, self.head_dim)
+            try:
+                ctx = torch.backends.cuda.sdp_kernel(
+                    enable_flash=True, enable_mem_efficient=True, enable_math=False
+                )
+            except Exception:
+                class _Noop:
+                    def __enter__(self_): return None
+                    def __exit__(self_, exc_type, exc, tb): return False
+                ctx = _Noop()
+            with ctx:
+                attn_out = F.scaled_dot_product_attention(
+                    q_sdpa, k_sdpa, v_sdpa, attn_mask=None, dropout_p=0.0, is_causal=False
+                )  # [B,H,T,Dh]
+            # Optional post-attention temporal convolution (depthwise along T)
+            if self.convolution and self.post_attn_convs is not None and len(self.post_attn_convs) > 0:
+                x_1d = attn_out.permute(0,1,3,2).reshape(B*self.num_heads, self.head_dim, T)  # [B*H,Dh,T]
+                # Streaming accumulation to avoid stacking all kernels at once
+                acc = None
+                for conv in self.post_attn_convs:
+                    tmp = conv(x_1d)  # [B*H,Dh,T'] with stride
+                    if self._post_stride > 1 and tmp.size(-1) != T:
+                        tmp = F.interpolate(tmp.unsqueeze(1), size=T, mode="linear", align_corners=False).squeeze(1)
+                    acc = tmp if acc is None else (acc + tmp)
+                x_1d = acc / float(len(self.post_attn_convs))
+                attn_out = x_1d.reshape(B, self.num_heads, self.head_dim, T).permute(0,1,3,2)
+            out = attn_out
+            out = out.view(B, self.num_heads, T, self.head_dim)
+            out = out.permute(2, 0, 1, 3).reshape(T, B, self.embed_dim)
+            out = self.out_proj(out)
+            weights = None if not need_weights else attn_out.mean(dim=1)  # approx; not used downstream here
+            return out, weights
+        else:
+            # classic path: scores then (optional) convolution over scores before softmax
+            scores = torch.bmm(q, k.transpose(1, 2))
+            if self.convolution:
+                scores = scores.view(B, self.num_heads, T, -1)
+                scores = self.attn_conv(scores)
+                scores = scores.reshape(B * self.num_heads, T, -1)
 
-        # add biases
-        if self.add_bias_kv:
-            bias = self.bias_k.repeat(B * self.num_heads, 1, 1)
-            scores = torch.cat([scores, bias], dim=2)
+            # add biases
+            if self.add_bias_kv:
+                bias = self.bias_k.repeat(B * self.num_heads, 1, 1)
+                scores = torch.cat([scores, bias], dim=2)
 
-        # apply attn_mask
-        if attn_mask is not None:
-            BpH, Tp, Pp = attn_mask.shape
-            mask_flat = attn_mask.reshape(-1, Pp)
-            comp_w = self.compress_k.weight[:, :Pp]
-            mask_comp = F.linear(mask_flat, comp_w)
-            mask_comp = mask_comp.view(BpH, Tp, self.proj_dim)
-            scores = scores + mask_comp
+            # apply attn_mask
+            if attn_mask is not None:
+                BpH, Tp, Pp = attn_mask.shape
+                mask_flat = attn_mask.reshape(-1, Pp)
+                comp_w = self.compress_k.weight[:, :Pp]
+                mask_comp = F.linear(mask_flat, comp_w)
+                mask_comp = mask_comp.view(BpH, Tp, self.proj_dim)
+                scores = scores + mask_comp
 
         # apply padding mask
         if key_padding_mask is not None:
@@ -376,21 +437,21 @@ class MultiheadLinearAttention(nn.Module):
             scores = torch.cat([scores, zeros], dim=2)
 
         # softmax
-        attn_probs = F.softmax(scores, dim=-1)
-        attn_probs = F.dropout(attn_probs, p=self.dropout, training=self.training)
+            attn_probs = F.softmax(scores, dim=-1)
+            attn_probs = F.dropout(attn_probs, p=self.dropout, training=self.training)
 
         # attend
-        out = torch.bmm(attn_probs, v)
-        out = out.view(B, self.num_heads, T, self.head_dim)
-        out = out.permute(2, 0, 1, 3).reshape(T, B, self.embed_dim)
-        out = self.out_proj(out)
+            out = torch.bmm(attn_probs, v)
+            out = out.view(B, self.num_heads, T, self.head_dim)
+            out = out.permute(2, 0, 1, 3).reshape(T, B, self.embed_dim)
+            out = self.out_proj(out)
 
-        weights = (
-            attn_probs.view(B, self.num_heads, T, -1).mean(dim=1)
-            if need_weights
-            else None
-        )
-        return out, weights
+            weights = (
+                attn_probs.view(B, self.num_heads, T, -1).mean(dim=1)
+                if need_weights
+                else None
+            )
+            return out, weights
 
 
 class MCABlock(nn.Module):
